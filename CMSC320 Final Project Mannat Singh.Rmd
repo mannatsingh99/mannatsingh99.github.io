@@ -1,0 +1,375 @@
+---
+title: "Final Project"
+output:
+  html_document: default
+  pdf_document: default
+---
+## Preface  
+The data that we are going to analyze is the dataset prvided by IMDb for movies throughout the world. The main reason that we are going to analyze this dataset is to possibly predict the profit of a movie based on its different attributes. This can be useful when exploring movie possibilities. Having knowledge of these variables would help to determine if a movie would even be profitable to make or not. We will look at the relationships between various variables and will finally use machine learning techniques to use attributes from the dataset to predict this.
+
+## Environment Setup
+Loading the required libraries
+```{r, message=FALSE, warning = FALSE}
+# data manipulation
+library(tidyverse)
+library(dplyr)
+
+# plotting
+library(ggplot2)
+library(ggrepel)
+
+#learning models
+library(rpart)
+library(rpart.plot)
+library(caret)
+library(data.table)
+```
+
+## Part 1: Data Curation, Parsing and Management
+
+## 1.1: Accessing and Viewing the data    
+First, we need to download the dataset from https://www.kaggle.com/carolzhangdc/imdb-5000-movie-dataset. The file downloaded will be in the form of a CSV(Comma-seperated value) file named movie_metadata.csv. After downloading it, we can easily read it in to R using the read_csv function.
+
+```{r, message = FALSE}
+# Reading the CSV file and storing it as a dataframe
+movie_tab <- read_csv("~/movie_metadata.csv")
+# View the data
+movie_tab
+```
+## 1.2: Data Overview:  
+This dataset is the IMDb dataset of movies. It contains 28 variables for 5043 movies spanning across 100 years in 66 countries. There are 2399 unique director names, and thousands of actors/actresses.
+
+## 1.3: Tidying the Data
+
+## 1.3.1 Removing Duplicates  
+In the IMDb data, we have some duplicate rows. First we will remove them so that we can work with only unique observations.
+```{r}
+# getting the number of duplicate rows
+sum(duplicated(movie_tab))
+```
+```{r}
+# removing the duplicate rows
+movie_tab <- movie_tab[!duplicated(movie_tab), ]
+```
+
+We get 4998 observations left.
+
+## 1.3.2 Removing Unnecessary Columns  
+There are some variables in the dataset that are not going to be used in this analysis. Thus, it is better to remove those variables(columns) so that the data is to the point and easier to manipulate. In particular, we will be dropping the following columns: color, Facebook likes for the movie, the movie's director and individual actors, the number of users who voted, aspect ratio, plot keywords and number of people in the movie's poster. 
+```{r}
+# removing unnecessary columns
+movie_tab <- movie_tab %>%
+ select(-color, -director_facebook_likes, - actor_3_facebook_likes, -actor_1_facebook_likes, -num_voted_users, -facenumber_in_poster, -plot_keywords, -movie_imdb_link, -actor_2_facebook_likes, -aspect_ratio, -movie_facebook_likes)
+movie_tab
+```
+
+## 1.3.3 Splitting Genres  
+One movie can have multiple genres. So, each record of genres is combined with a few types, which will cause difficulty in analyzing.
+```{r}
+# viewing the first few genres to see how they are listed
+head(movie_tab$genres)
+```
+
+We are only going to keep track of Action, Adventure, Fantasy, Sci-fi, Family, Drama and Comedy. We will keep these on as logical attributes, so if a movie has multiple genres it will be true for those respective attributes.
+```{r}
+movie_tab$Action <- movie_tab$genres %like% "Action"
+movie_tab$Adventure <- movie_tab$genres %like% "Adventure"
+movie_tab$Fantasy <- movie_tab$genres %like% "Fantasy"
+movie_tab$SciFi <- movie_tab$genres %like% "Sci-Fi"
+movie_tab$Family <- movie_tab$genres %like% "Family"
+movie_tab$Drama <- movie_tab$genres %like% "Drama"
+movie_tab$Comedy <- movie_tab$genres %like% "Comedy"
+# movie_tab <- movie_tab %>% select(-genres)
+movie_tab
+```
+
+## 1.3.4 Missing Values
+We are going to remove missing values from each column, that is, values that are stored as NA.
+```{r}
+movie_tab <- na.omit(movie_tab)
+```
+
+# Part 2: Exploratory Data Analysis
+The IMDb movies dataset is now ready to be analyzed. In this part we will try to understand the data better by visulaizing the data we cleaned with some plots to explain the trend of movies throughout the world.
+
+# 2.1: Movies by Country  
+We would like to study the distribution of movies in the IMDb database based on country to see if there is some country that dominates movie production in the given data.
+
+## 2.1.1 Data Preparation  
+Let's take a look at the different countries in which movies were made for this dataset.
+```{r}
+table(movie_tab$country)
+```
+
+As we can see, majority of movies are from USA, UK and France. So we group the other countries together to make this categorical variable with less levels: USA, UK, France, Others.
+
+```{r}
+# converting the 'country' variable to a factor so that we can seperate the different levels
+movie_tab$country <- as.factor(movie_tab$country)
+levels(movie_tab$country) <- c(levels(movie_tab$country), "Others")
+movie_tab$country[(movie_tab$country != 'USA') & (movie_tab$country != 'UK') & (movie_tab$country != 'France')] <- 'Others'
+movie_tab$country <- factor(movie_tab$country)
+
+# creating a new dataframe 'countries' which will group the IMDb dataset by country and will contain the number of movies for each of the levels: USA, UK, France and Others.
+countries <- movie_tab %>%
+group_by(country) %>% 
+summarize(number_of_movies = n()) %>% 
+arrange(-number_of_movies)
+
+# displaying the results in descending order
+countries 
+```
+
+## 2.1.2: Plotting  
+To visually explore the data, we make a bar graph of the number of movies made in USA, UK, France and all the other countries.
+```{r}
+countries %>%
+ggplot(aes(x = country, y = number_of_movies, fill = country)) +
+geom_bar(stat="identity") +
+  labs(x = "Country", y = "Number of movies", title = "Bar graph showing number of movies made per country") 
+ 
+```
+
+## 2.2: Movies per Year  
+
+We will now analyze the distribution of movies with repect to the year in which they were released.
+```{r}
+movie_tab %>%
+ggplot(aes(title_year)) +
+  geom_bar() +
+  labs(x = "Year movie was released", y = "Movie Count", title = "Histogram of Movies released per Year") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+As we can see from the graph, movie production seems to have just exploded after 1990. This increase could be due to advancement in technology and commercialisation of the internet.
+
+From the graph, we also see there are not many records of movies released before 1980. Thus, it is better to remove those records because they might not be representative of the actual amount of movies released during those time periods i.e. before 1980.
+```{r}
+movie_tab <- movie_tab[movie_tab$title_year >= 1980,]
+```
+
+# 2.3: Studying Movie Budgets   
+
+## 2.3.1 Visual Analysis
+
+We create histogram of budgets, so that we can see the distribution of budgets and what is the most common range. We draw a vertical red line at the median budget.
+```{r, warning=FALSE}
+movie_tab %>%
+  ggplot(aes(x= budget)) + 
+  geom_histogram(bins = 50) + scale_x_continuous(labels = scales::dollar, limits= c(0, 250000000)) + geom_vline(aes(xintercept=median(budget)), color="red") 
+```
+
+As we can see from the graph, the histogram is skewed to the right. Since the data is skewed, we will be using the median as a measure of central tendency and the Interquartile Range as a measure of spread.
+
+## 2.3.2: Numeric Analysis
+```{r}
+# to disable scientific notation
+options(scipen = 999)
+
+#calculating the median and Interquartile Range for movie budgets
+movie_tab %>% 
+  summarise(median_budget = median(budget), iqr_budget = IQR(budget))
+
+```
+
+# 2.4: Best Directors  
+
+We will now try to find the best directors based on the gross money that their movies made. 
+
+## 2.4.1: Preparing the Data  
+We add a new column to our dataset which corresponds to the profit the movie made. The profit is calculated as the gross amount the money earned minus the budget of the movie.
+```{r}
+## adding the profit column
+movie_tab <- movie_tab %>% 
+  mutate(profit = gross - budget)
+```
+
+## 2.4.2: Plotting  
+We first group by directors, so that we can perform analysis on each director. We then filter for the maximum profit movie for each director, and then ungroup the data. We can order the data in highest to lowest, then take the top 10 directors. After that, we rearrange the factors in reverse order so that when we plot it, it looks in order. Finally, we plot the data with labels (using ggrepel so that the labels look aesthetically better)
+```{r}
+# preparing the data for plotting
+director_graph <- movie_tab %>%
+  group_by(director_name) %>%
+  filter(profit==max(profit)) %>%
+  ungroup() %>%
+  arrange(desc(profit)) %>%
+  slice(1:10)
+
+# reversing the factors in reverse orders
+director_graph$director_name <- factor(director_graph$director_name, rev(as.character(director_graph$director_name)))
+
+# plotting
+director_graph %>%
+  ggplot(aes(y=director_name, x=gross)) + geom_point() + ggtitle("Top 10 Highest Grossing Directors") + ylab("Director") + xlab("Profit") + scale_x_continuous(labels = scales::dollar)  + geom_label_repel(aes(label=movie_title))
+
+```
+
+## 2.5: Top 20 Movies Based on Profit  
+We will now extract the top movies based on their profit. We will do so by plotting the top 20 movies by profit against their budgets so that we can see if only the high budget films are the most profitable.
+```{r, message = FALSE}
+movie_tab %>%
+  arrange(desc(profit)) %>%
+  top_n(20, profit) %>%
+  ggplot(aes(x=budget/1000000, y=profit/1000000)) +
+  geom_point() +
+  geom_smooth() + 
+  geom_text_repel(aes(label=movie_title)) +
+  labs(x = "Budget $million", y = "Profit $million", title = "Top 20 Profitable Movies") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+From the plot above, we see that Avatar had the highest budget among all the movies and also has the highest profit. We also see that it is not just the high budget films that are most profitable. Films like 'The Hunger Games', 'The Lion King', 'ET' are low budget films that are equally profitable as high budget films like 'The Avengers' or 'The Dark Knight'.
+
+# Part 3: Hypothesis Testing
+
+## 3.1: Overview
+Before looking at the distribution of the total number of movies that are profitable, I hypothesize that more than half of the movies will be profitable. The basis of this claim is that from the last graph that we made for profits vs. budget for the top 20 movies, we see that many of the movies have smaller budgets but are still among the top 20 profitable movies. Thus I will use hypothesis testing to test my claim.  
+The Null Hypothesis would be that 50% or less of the movies are profitable.  
+The Alternative Hypothesis would be that more that 50% of the movies are profitable. We can represent this as:
+$$
+\begin{aligned}
+H_0: \, & p <= .5 & \textrm{(null)} \\
+H_1: \, & p > .5 & \textrm{(alternative)}
+\end{aligned}
+$$
+
+##3.2: Calculation of $\hat{p}$
+
+We will keep track of a logical analogy for the profit. So, if the profit was greater than 0, the movie was profitable. If not then the movie was not profitable.
+```{r}
+# adding a new logical column: profitable that indicates if the movie was profitable or not
+movie_tab <- movie_tab %>%
+  mutate(profitable = ifelse(profit > 0, TRUE, FALSE))
+```
+
+We can extract the proportion of profitable and unprofitable films using the summary method. First we group by profitability then we summarize by number of elements. We convert to a matrix so that we can access elements via indices.
+```{r}
+## finding the number of movies that are profitable and not profitable
+summary_data <- movie_tab %>%
+  group_by(profitable) %>%
+  summarize(num = n()) %>%
+  ungroup()
+summary_data <- as.matrix(summary_data)
+
+profitable_trues <- summary_data[,2][2] 
+p_hat <- (profitable_trues)/(profitable_trues + summary_data[,2][1])
+p_hat
+```
+
+## 3.3: Calculations  
+We will now check to see if we can reject the null hypothesis or not at a 95% confidence level. First we will calculate the the standard error. Then we will calculate the p-value. Since we are testing at a 95% confidence level, if the p-value is less than or equal to 0.05, we will reject the null hypothesis and will not reject the null hypothesis if it is greater than 0.05.
+
+```{r}
+sample_size <- nrow(movie_tab)
+se <- sqrt(0.5264579*(1-0.5264579)) / sqrt(sample_size)
+p_value = 1-pnorm(0.5264579, mean=.5, sd=se)
+p_value
+```
+
+Since 0.000629863 <= 0.05, thus we should reject the null hypothesis in this case.
+Thus, we have sufficient evidence to reject the null hypothesis that 50% or less movies are profitable.
+
+# Part 4: Machine Learning
+
+# 4.1: Linear Regression
+
+
+## Relationship between IMDb score and Year of release 
+# 4.1.1 Linear regression model
+We will first fit a linear regression model of IMDb score vs. Year of release for movies and test for a relationship between them. The null hypothesis would be one of no relationship. We will also be filtering the years to start from 2000 so that we can study the relationship for the 21st century.
+```{r}
+# filtering the years to study relationship for 21st century
+movie_tab_21st <- movie_tab %>%
+  filter(title_year %in% c(2000:2017))
+
+# making the linear regression model
+movie_fit2 <- lm(imdb_score~title_year, data=movie_tab_21st)
+movie_fit2 %>%
+  broom::tidy()
+```
+
+As we can see from the above result, on average, the IMDb score of a movie increases by 0.0127515 points for every year in the 21st century.
+Also, since the p-value is very low and is less than 0.05(0.0029405056 <= 0.05), thus we can reject the null hypothesis of no relationship between a movie's IMDb score and its year of release.
+
+## 4.1.2: Plot of Residuals  
+We will now make a violin plot of residuals to check for linearity of the regression model.
+```{r}
+augmented_model <- movie_fit2 %>% 
+  broom::augment()
+
+augmented_model %>%
+ggplot(aes(x = factor(title_year), y = .resid)) +
+geom_violin() +
+labs(title = "Violin plot of residuals vs. year", x = "Year", y = "Residuals" )
+```
+
+The violin plot matches the assumptions of the linear regression model as we see that the residuals are symmetric about the residual = 0 line, across years. Thus, we can assume that the model is linear.
+
+## 4.1.3: Plot of Residual vs. Fitted values  
+We will also make a scatterplot of residual vs. fitted values to check for non-linearity in the outcome-predictor relationship.
+```{r, message=FALSE}
+augmented_model %>%
+  ggplot(aes(x=.fitted,y=.resid)) +
+    geom_point() + 
+    geom_smooth() +
+    labs(x="fitted", y="residual")
+```
+
+The plot matches the assumptions of the linear regression model extremely well. The residuals are symmetric about the residual = 0 line for all the fitted values and throughout the graph, there is no major source of non-linearity. Thus, we can say that the model is completely linear.
+
+# 4.2 Data Prediction  
+We will try to predict the profitability of a movie based on its budget and popularity. The popularity will be measured using the 'cast-total_likes_facebook' variable. 
+
+## 4.2.1: Decision Trees
+The first method we will use to predict the profitability of a movie is a decision tree. A decision tree represents different paths that can be taken, based on given information. Each fork in the tree represents a different decision to be made, based on feature probability; each leaf represents the final classification based on the input. The algorithms behind creating these trees are further expanded on [here](https://towardsdatascience.com/decision-trees-in-machine-learning-641b9c4e8052).
+
+To create a decision tree we have to give it data to train on. We need to provide a testing set to evaluate our model, which we take out of our data set. This technique is called cross validation. We partition our data set into 80% and 20%, where the larger partition is used for training.
+```{r}
+set.seed(1337)
+prediction_set <- movie_tab %>%
+  select(profitable, budget, cast_total_facebook_likes)
+index <- createDataPartition(y=prediction_set$profitable, p=0.8, list=FALSE)
+
+data_train <- prediction_set[index,]
+data_test <- prediction_set[-index,]
+```
+
+Our data is from the data_train partition we created and our method is classification of probability. With all those parameters, we can now build a decision tree.
+
+We call predict() to actually call our tree on our test set. It returns the probability of the provided data being True or False. We convert this to true if the “true percentage” is greater than or equal to 50, and false otherwise. Finally we create a confusion matrix to view the acutal performance of our model on the test set.
+```{r}
+decision_tree <- rpart(profitable~budget+cast_total_facebook_likes, data=data_train, method="class")
+predictions_decision <- predict(decision_tree, data_test)
+predictions_decision <- factor(ifelse(predictions_decision[,2]>0.5, TRUE, FALSE))
+data_test$profitable <- factor(data_test$profitable)
+confusionMatrix(predictions_decision, data_test$profitable)
+```
+
+The biggest problem that we see in the confusion matrix is that 215 falses were predicted true. The accuracy of the model was only 55.54%.
+
+Now we graph our tree:
+```{r}
+tree <- rpart(profitable~budget+cast_total_facebook_likes, data=movie_tab)
+
+rpart.plot(tree, box.palette="RdBu", shadow.col="gray", nn=TRUE)
+```
+
+## 4.2.2: 10-fold Cross Validation  
+We will now try a different cross validation to see if we can improve accuracy. We can now try a 10-fold cross validation. This involves splitting the data into k partitions, where we train on (k-1) partitions and test on 1 partition. We repeat this so that every partition is tested on once. This [article] (https://machinelearningmastery.com/k-fold-cross-validation/) provides a nice introduction to k-fold cross validation.
+```{r}
+prediction_set$profitable <- factor(prediction_set$profitable)
+train_control <- trainControl(method="cv", number=10)
+tree_fit <- train(profitable~budget+cast_total_facebook_likes, data=prediction_set, method="rpart", trControl=train_control, tuneLength = 10)
+tree_fit
+```
+
+Our accuracy is now 56.23% which is a bit better than what we got before.  
+We will now plot the tree to see what it looks like
+```{r}
+rpart.plot(tree_fit$finalModel, cex=0.8)
+```
+
+# Conclusion
+Estimating movie profit is a challenging problem that involves many moving pieces. The profit of a movie obviously cannot be predicted with just the budget and popularity, as many more complex variables regarding merchandising, marketing and actor status affect its success. However we have proved that we can get a close estimate using different machine learning models.
+
+
